@@ -11,7 +11,7 @@ env:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -76,7 +76,7 @@ jobs:
         path: ./target/release/sanzu_server
 
   build-cross-client-windows:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     defaults:
       run:
@@ -130,7 +130,7 @@ jobs:
 
 
   fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -141,7 +141,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - name: Security audit
@@ -150,7 +150,7 @@ jobs:
          token: ${{ secrets.GITHUB_TOKEN }}
 
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
