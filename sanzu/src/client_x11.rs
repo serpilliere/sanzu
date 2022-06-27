@@ -760,27 +760,35 @@ impl Client for ClientInfo {
             match event {
                 Event::MotionNotify(event) => {
                     trace!("Mouse move");
-                    let eventmove = tunnel::EventMove {
-                        x: event.event_x as u32,
-                        y: event.event_y as u32,
-                        absolute: self.show_cursor,
-                    };
-
-                    /*
-                    let ptr = self.conn.xinput_xi_query_pointer(
-                        self.window_info.window,
-                        1u16,
-                    )
-                        .context("Cannot query pointer")
-                        .expect("xx")
-                        .reply()
-                        .expect("yy");
-                    info!("ptr {:?}", ptr);
-                    */
-                    /* If multiple mose moves, keep only last one */
-                    last_move = Some(tunnel::MessageClient {
-                        msg: Some(tunnel::message_client::Msg::Move(eventmove)),
-                    });
+                    if self.show_cursor {
+                        info!("send absolute");
+                        // Only send absolute coordinate if cursor is displayed
+                        let eventmove = tunnel::EventMove {
+                            x: event.event_x as i32,
+                            y: event.event_y as i32,
+                            absolute: self.show_cursor,
+                        };
+                        /* If multiple mose moves, keep only last one */
+                        last_move = Some(tunnel::MessageClient {
+                            msg: Some(tunnel::message_client::Msg::Move(eventmove)),
+                        });
+                    }
+                }
+                Event::XinputRawMotion(event) => {
+                    //info!("Raw event {:?}", event.axisvalues);
+                    info!("Raw event {:?}", event.axisvalues_raw);
+                    if !self.show_cursor {
+                        info!("send relative");
+                        let eventmove = tunnel::EventMove {
+                            x: event.axisvalues_raw[0].integral as i32,
+                            y: event.axisvalues_raw[1].integral as i32,
+                            absolute: self.show_cursor,
+                        };
+                        let msg_event = tunnel::MessageClient {
+                            msg: Some(tunnel::message_client::Msg::Move(eventmove)),
+                        };
+                        events.push(msg_event);
+                    }
                 }
 
                 Event::ButtonPress(event) => {
@@ -899,10 +907,6 @@ impl Client for ClientInfo {
                 }
                 Event::RandrNotify(event) => {
                     trace!("RandrNotify {:?}", event);
-                }
-                Event::XinputRawMotion(event) => {
-                    //info!("Raw event {:?}", event.axisvalues);
-                    info!("Raw event {:?}", event.axisvalues_raw);
                 }
                 Event::Error(_event) => {}
                 _ => {
