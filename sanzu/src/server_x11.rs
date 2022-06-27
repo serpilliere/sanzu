@@ -615,7 +615,7 @@ fn connect_to_dbus_print(printfile_sender: Sender<PrintFile>) -> Result<()> {
 fn setup_window<C: Connection>(conn: &C, screen: &Screen) -> Result<Window> {
     let win_id = conn.generate_id().context("Error in x11rb generate_id")?;
     let win_aux = CreateWindowAux::new()
-        .event_mask(EventMask::STRUCTURE_NOTIFY)
+        .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::ENTER_WINDOW | EventMask::LEAVE_WINDOW)
         .background_pixel(screen.white_pixel);
 
     conn.create_window(
@@ -806,12 +806,20 @@ pub fn init_x11rb(
     }
 
     /* Register window structure modifications */
+    /*
     let prop = ChangeWindowAttributesAux::default()
-        .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_NOTIFY);
+        .event_mask(
+            EventMask::STRUCTURE_NOTIFY |
+            EventMask::SUBSTRUCTURE_NOTIFY |
+            EventMask::ENTER_WINDOW |
+            EventMask::LEAVE_WINDOW
+
+        );
     conn.change_window_attributes(screen.root, &prop)
         .context("Error in change_window_attributes")?
         .check()
         .context("Error in change_window_attributes check")?;
+     */
 
     /* Dbus for handling notification */
     #[cfg(feature = "notify")]
@@ -1111,10 +1119,11 @@ impl Server for ServerX11 {
         for msg in msgs.msgs.iter() {
             match &msg.msg {
                 Some(tunnel::message_client::Msg::Move(event)) => {
-                    trace!("Mouse move {} {}", event.x, event.y);
+                    trace!("Mouse move {} {} {:?}", event.x, event.y, event.absolute);
+                    let relative = if event.absolute { 0 } else { 1 };
                     if let Err(err) = self.conn.xtest_fake_input(
                         6,
-                        0,
+                        relative,
                         0,
                         self.root,
                         event.x as i16,
@@ -1239,19 +1248,19 @@ impl Server for ServerX11 {
                 Event::NoExposure(_event) => {}
 
                 Event::CreateNotify(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     if create_area(self, event.window, self.root) {
                         self.modified_area = true;
                     }
                 }
                 Event::MapNotify(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     if map_area(self, event.window, true) {
                         self.modified_area = true;
                     }
                 }
                 Event::ReparentNotify(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     if reparent_window(self, event.window, event.parent) {
                         self.modified_area = true;
                     } else {
@@ -1259,19 +1268,19 @@ impl Server for ServerX11 {
                     }
                 }
                 Event::DestroyNotify(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     if destroy_area(self, event.window) {
                         self.modified_area = true;
                     }
                 }
                 Event::UnmapNotify(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     if map_area(self, event.window, false) {
                         self.modified_area = true;
                     }
                 }
                 Event::ConfigureNotify(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     if update_area(
                         self,
                         event.window,
@@ -1285,10 +1294,12 @@ impl Server for ServerX11 {
                     }
                 }
                 Event::ClientMessage(event) => {
-                    trace!("{:?}", event);
+                    info!("{:?}", event);
                     self.modified_area = true;
                 }
-                Event::Error(_event) => {}
+                Event::Error(_) => {
+                    info!("{:?}", event);
+                }
                 _ => {
                     warn!("Unknown event {:?}", event);
                 }

@@ -183,6 +183,7 @@ message ClientHelloResolution {
 message EventMove {
   uint32 x = 1;
   uint32 y = 2;
+  bool absolute = 3;
 };
 
 message EventButton {

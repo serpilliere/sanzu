@@ -27,6 +27,7 @@ use x11rb::{
         shape::{self, ConnectionExt as _},
         shm::{self, ConnectionExt as _},
         xfixes::ConnectionExt as _,
+        xinput::{self, ConnectionExt as _},
         xproto::ConnectionExt as _,
         xproto::*,
         Event,
@@ -123,6 +124,7 @@ pub struct ClientInfo {
     pub skip_clipboard_primary: Arc<Mutex<u32>>,
     pub skip_clipboard_clipboard: Arc<Mutex<u32>>,
     pub display_stats: bool,
+    pub show_cursor: bool,
 }
 
 fn create_gc<C: Connection>(
@@ -350,6 +352,28 @@ pub fn init_x11rb(
     let window_info =
         new_area(&conn, arguments, screen, (width, height)).context("Error in new_area")?;
 
+    /* Register xinput */
+    conn.extension_information(xinput::X11_EXTENSION_NAME)
+        .context("failed to get extension information")?
+        .context("Xinput must be supported")?;
+
+    let reply = conn
+        .xinput_xi_query_version(2, 2)
+        .context("Error in query xinput version")?
+        .reply()
+        .context("Error in xinput version reply")?;
+    info!("reply {:?}", reply);
+
+    let xx: u32 = xinput::Device::ALL.into();
+    info!("xx {:?}", xx);
+    let xinput_event_masks = xinput::EventMask {
+        deviceid: 1u16, //xinput::Device::ALL.into(), /*XIAllMasterDevices*/
+        mask: [xinput::XIEventMask::RAW_MOTION.into()].to_vec(),
+    };
+
+    conn.xinput_xi_select_events(screen.root, &[xinput_event_masks])
+        .context("Error in xinput select event")?;
+
     let black_gc = create_gc(&conn, screen.root, screen.black_pixel, screen.black_pixel)
         .context("Error in create_gc")?;
     let keys_state = vec![false; 0x100];
@@ -373,6 +397,7 @@ pub fn init_x11rb(
         skip_clipboard_primary,
         skip_clipboard_clipboard,
         display_stats: false,
+        show_cursor: true,
     };
 
     Ok(Box::new(client_info))
@@ -533,6 +558,13 @@ impl Client for ClientInfo {
     }
 
     fn set_cursor(&mut self, cursor_data: &[u8], size: (u32, u32), hot: (u16, u16)) -> Result<()> {
+        let count = cursor_data.iter().filter(|&n| *n == 0).count();
+        self.show_cursor = if count == cursor_data.len() {
+            false
+        } else {
+            true
+        };
+
         let cid = self
             .conn
             .generate_id()
@@ -731,8 +763,20 @@ impl Client for ClientInfo {
                     let eventmove = tunnel::EventMove {
                         x: event.event_x as u32,
                         y: event.event_y as u32,
+                        absolute: self.show_cursor,
                     };
 
+                    /*
+                    let ptr = self.conn.xinput_xi_query_pointer(
+                        self.window_info.window,
+                        1u16,
+                    )
+                        .context("Cannot query pointer")
+                        .expect("xx")
+                        .reply()
+                        .expect("yy");
+                    info!("ptr {:?}", ptr);
+                    */
                     /* If multiple mose moves, keep only last one */
                     last_move = Some(tunnel::MessageClient {
                         msg: Some(tunnel::message_client::Msg::Move(eventmove)),
@@ -855,6 +899,10 @@ impl Client for ClientInfo {
                 }
                 Event::RandrNotify(event) => {
                     trace!("RandrNotify {:?}", event);
+                }
+                Event::XinputRawMotion(event) => {
+                    //info!("Raw event {:?}", event.axisvalues);
+                    info!("Raw event {:?}", event.axisvalues_raw);
                 }
                 Event::Error(_event) => {}
                 _ => {
