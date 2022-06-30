@@ -615,7 +615,7 @@ fn connect_to_dbus_print(printfile_sender: Sender<PrintFile>) -> Result<()> {
 fn setup_window<C: Connection>(conn: &C, screen: &Screen) -> Result<Window> {
     let win_id = conn.generate_id().context("Error in x11rb generate_id")?;
     let win_aux = CreateWindowAux::new()
-        .event_mask(EventMask::STRUCTURE_NOTIFY)
+        .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_NOTIFY)
         .background_pixel(screen.white_pixel);
 
     conn.create_window(
@@ -804,14 +804,6 @@ pub fn init_x11rb(
             areas.insert(index, area);
         }
     }
-
-    /* Register window structure modifications */
-    let prop = ChangeWindowAttributesAux::default()
-        .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_NOTIFY);
-    conn.change_window_attributes(screen.root, &prop)
-        .context("Error in change_window_attributes")?
-        .check()
-        .context("Error in change_window_attributes check")?;
 
     /* Dbus for handling notification */
     #[cfg(feature = "notify")]
@@ -1111,10 +1103,11 @@ impl Server for ServerX11 {
         for msg in msgs.msgs.iter() {
             match &msg.msg {
                 Some(tunnel::message_client::Msg::Move(event)) => {
-                    trace!("Mouse move {} {}", event.x, event.y);
+                    trace!("Mouse move {} {} {:?}", event.x, event.y, event.absolute);
+                    let relative = if event.absolute { 0 } else { 1 };
                     if let Err(err) = self.conn.xtest_fake_input(
                         6,
-                        0,
+                        relative,
                         0,
                         self.root,
                         event.x as i16,

@@ -27,6 +27,7 @@ use x11rb::{
         shape::{self, ConnectionExt as _},
         shm::{self, ConnectionExt as _},
         xfixes::ConnectionExt as _,
+        xinput::{self, ConnectionExt as _},
         xproto::ConnectionExt as _,
         xproto::*,
         Event,
@@ -123,6 +124,7 @@ pub struct ClientInfo {
     pub skip_clipboard_primary: Arc<Mutex<u32>>,
     pub skip_clipboard_clipboard: Arc<Mutex<u32>>,
     pub display_stats: bool,
+    pub show_cursor: bool,
 }
 
 fn create_gc<C: Connection>(
@@ -359,6 +361,24 @@ pub fn init_x11rb(
     let window_info =
         new_area(&conn, arguments, screen, (width, height)).context("Error in new_area")?;
 
+    /* Register xinput to allow relative mouse movement grabbing */
+    conn.extension_information(xinput::X11_EXTENSION_NAME)
+        .context("failed to get extension information")?
+        .context("Xinput must be supported")?;
+
+    conn.xinput_xi_query_version(2, 2)
+        .context("Error in query xinput version")?
+        .reply()
+        .context("Error in xinput version reply")?;
+
+    let xinput_event_masks = xinput::EventMask {
+        deviceid: 1u16, // XIAllMasterDevices
+        mask: [xinput::XIEventMask::RAW_MOTION.into()].to_vec(),
+    };
+
+    conn.xinput_xi_select_events(screen.root, &[xinput_event_masks])
+        .context("Error in xinput select event")?;
+
     let black_gc = create_gc(&conn, screen.root, screen.black_pixel, screen.black_pixel)
         .context("Error in create_gc")?;
     let keys_state = vec![false; 0x100];
@@ -382,6 +402,7 @@ pub fn init_x11rb(
         skip_clipboard_primary,
         skip_clipboard_clipboard,
         display_stats: false,
+        show_cursor: true,
     };
 
     Ok(Box::new(client_info))
@@ -542,6 +563,14 @@ impl Client for ClientInfo {
     }
 
     fn set_cursor(&mut self, cursor_data: &[u8], size: (u32, u32), hot: (u16, u16)) -> Result<()> {
+        /* Guest is cursor is displayed or not */
+        let count = cursor_data.iter().filter(|&n| *n == 0).count();
+        self.show_cursor = if count == cursor_data.len() {
+            false
+        } else {
+            true
+        };
+
         let cid = self
             .conn
             .generate_id()
@@ -737,15 +766,36 @@ impl Client for ClientInfo {
             match event {
                 Event::MotionNotify(event) => {
                     trace!("Mouse move");
-                    let eventmove = tunnel::EventMove {
-                        x: event.event_x as u32,
-                        y: event.event_y as u32,
-                    };
-
-                    /* If multiple mose moves, keep only last one */
-                    last_move = Some(tunnel::MessageClient {
-                        msg: Some(tunnel::message_client::Msg::Move(eventmove)),
-                    });
+                    /* If the cursor is present, send absolute coordinates */
+                    if self.show_cursor {
+                        trace!("send absolute");
+                        // Only send absolute coordinate if cursor is displayed
+                        let eventmove = tunnel::EventMove {
+                            x: event.event_x as i32,
+                            y: event.event_y as i32,
+                            absolute: self.show_cursor,
+                        };
+                        /* If multiple mose moves, keep only last one */
+                        last_move = Some(tunnel::MessageClient {
+                            msg: Some(tunnel::message_client::Msg::Move(eventmove)),
+                        });
+                    }
+                }
+                Event::XinputRawMotion(event) => {
+                    trace!("Raw event {:?}", event.axisvalues_raw);
+                    /* If cursor is transparent, we will switch in relative mouse movement */
+                    if !self.show_cursor {
+                        trace!("send relative");
+                        let eventmove = tunnel::EventMove {
+                            x: event.axisvalues_raw[0].integral as i32,
+                            y: event.axisvalues_raw[1].integral as i32,
+                            absolute: self.show_cursor,
+                        };
+                        let msg_event = tunnel::MessageClient {
+                            msg: Some(tunnel::message_client::Msg::Move(eventmove)),
+                        };
+                        events.push(msg_event);
+                    }
                 }
 
                 Event::ButtonPress(event) => {

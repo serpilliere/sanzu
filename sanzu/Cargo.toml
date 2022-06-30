@@ -70,7 +70,7 @@ x11-clipboard = "0.6.1"
 
 [dependencies.x11rb]
 version = "0.10.0"
-features = ["shm", "xtest", "xfixes", "damage", "randr"]
+features = ["shm", "xtest", "xfixes", "xinput", "damage", "randr"]
 
 [package.metadata.deb]
 maintainer = "Fabrice Desclaux <fabrice.desclaux@cea.fr>"
