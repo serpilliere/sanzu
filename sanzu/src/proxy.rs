@@ -18,7 +18,7 @@ use sanzu_common::{
 use std::{
     fmt::Write as _,
     fs,
-    io::Cursor,
+    io::{prelude::*, Cursor},
     net::{SocketAddr, TcpListener, TcpStream},
     os::unix::net::UnixStream,
     sync::mpsc::channel,
@@ -134,6 +134,23 @@ macro_rules! send_srv_msg_type {
         };
         Tunnel::send($sock, msgsrv_ok).context("Error in send: Peer has closed connection?")
     }};
+}
+
+const RECORD_FPS: u32 = 25;
+const SUBS_FRAME_DELAY: u32 = 10;
+
+fn frame_index_to_time(frame_tick: u32) -> (u32, u32, u32, u32) {
+    let hours = frame_tick / (RECORD_FPS * 60 * 60);
+    let frame_tick = frame_tick - hours * (RECORD_FPS * 60 * 60);
+
+    let mins = frame_tick / (RECORD_FPS * 60);
+    let frame_tick = frame_tick - mins * (RECORD_FPS * 60);
+
+    let secs = frame_tick / RECORD_FPS;
+    let frame_tick = frame_tick - secs * RECORD_FPS;
+
+    let millis = (frame_tick * 1000) / RECORD_FPS;
+    (hours, mins, secs, millis)
 }
 
 pub fn run(config: &ConfigServer, arguments: &ArgumentsProxy) -> Result<()> {
@@ -331,6 +348,16 @@ pub fn run(config: &ConfigServer, arguments: &ArgumentsProxy) -> Result<()> {
         });
     }
 
+    let (mut file, mut file_sub) = if let Some(record_path) = arguments.record_path.as_ref() {
+        let path_rec = format!("{}.rec", record_path);
+        let file = Some(fs::File::create(path_rec).context("Cannot create video rec file")?);
+        let path_sub = format!("{}.sub", record_path);
+        let file_sub = Some(fs::File::create(path_sub).context("Cannot create video sub file")?);
+        (file, file_sub)
+    } else {
+        (None, None)
+    };
+
     let mut count = 0;
     let mut sound_data = vec![];
     loop {
@@ -447,6 +474,12 @@ pub fn run(config: &ConfigServer, arguments: &ArgumentsProxy) -> Result<()> {
                         timings_str
                     ));
                     count += 1;
+
+                    if let Some(file) = file.as_mut() {
+                        file.write_all(&encoded)
+                            .context("Cannot write video record")?;
+                    }
+
                     let msg = tunnel::message_srv::Msg::ImgEncoded(tunnel::ImageEncoded {
                         data: encoded,
                         width: img.width,
@@ -487,6 +520,35 @@ pub fn run(config: &ConfigServer, arguments: &ArgumentsProxy) -> Result<()> {
         let msgs = recv_client_msg_type!(&mut client, Msgsclient)
             .context("Error in recv MessagesClient")
             .map_err(|err| send_client_err_event(&mut server, err))?;
+
+        if let Some(file_sub) = &mut file_sub {
+            // Log keys to subs
+            for msg in msgs.msgs.iter() {
+                if let Some(tunnel::message_client::Msg::Key(event)) = &msg.msg {
+                    let time_start = frame_index_to_time(count as u32);
+                    let time_start_str = format!(
+                        "{:02}:{:02}:{:02},{:03}",
+                        time_start.0, time_start.1, time_start.2, time_start.3,
+                    );
+                    let time_stop = frame_index_to_time(count as u32 + SUBS_FRAME_DELAY);
+                    let time_stop_str = format!(
+                        "{:02}:{:02}:{:02},{:03}",
+                        time_stop.0, time_stop.1, time_stop.2, time_stop.3,
+                    );
+
+                    let state = if event.updown { "down" } else { "up" };
+                    let text = format!("key: {:>3} {}", event.keycode, state);
+                    let sub = format!(
+                        "{}\n{} --> {}\n{}\n",
+                        count, time_start_str, time_stop_str, text
+                    );
+
+                    file_sub
+                        .write_all(sub.as_bytes())
+                        .context("Cannot write sub")?;
+                }
+            }
+        }
 
         send_client_msg_type!(&mut server, msgs, Msgsclient)
             .context("Error in send MessagesClient")

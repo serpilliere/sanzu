@@ -68,6 +68,7 @@ pub struct ArgumentsProxy<'a> {
     pub audio: bool,
     pub video_shared_mem: Option<String>,
     pub shm_is_xwd: bool,
+    pub record_path: Option<String>,
 }
 
 const MAX_HEADER_SIZE: u32 = 0x100;

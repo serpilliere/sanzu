@@ -106,6 +106,13 @@ Protocol version: {:?}
                 .long("shm_is_xwd")
                 .num_args(0),
         )
+        .arg(
+            Arg::new("record_path")
+                .short('r')
+                .long("record_path")
+                .num_args(1)
+                .help("Record video session directory"),
+        )
         .get_matches();
 
     let server_addr = matches
@@ -129,6 +136,7 @@ Protocol version: {:?}
     let vsock = matches.get_flag("vsock");
     let import_video_shm = matches.get_one::<String>("import_video_shm").cloned();
     let shm_is_xwd = matches.get_flag("shm_is_xwd");
+    let record_path = matches.get_one::<String>("record_path").cloned();
 
     let arguments = ArgumentsProxy {
         vsock,
@@ -141,6 +149,7 @@ Protocol version: {:?}
         audio,
         video_shared_mem: import_video_shm,
         shm_is_xwd,
+        record_path,
     };
 
     if let Err(err) = proxy::run(&conf, &arguments) {
