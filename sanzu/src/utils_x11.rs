@@ -79,6 +79,7 @@ pub fn get_clipboard<C: Connection>(conn: &C, window: Window) -> Result<String> 
 
 /// List video mode
 pub fn list_video_mode<C: Connection>(conn: &C, window: Window) -> Result<()> {
+    debug!("List video mode");
     let screen_resources = randr::get_screen_resources(conn, window)
         .context("Error in get_screen_resources")?
         .reply()
@@ -92,6 +93,18 @@ pub fn list_video_mode<C: Connection>(conn: &C, window: Window) -> Result<()> {
         debug!("mode {} name {:?} {:?}", index, name, mode.id);
         offset += mode.name_len as usize;
     }
+
+    for crtc in screen_resources.crtcs {
+        let reply = randr::get_crtc_info(conn, crtc, 0).context("Cannot get crtc")?;
+        let crtc_data = reply.reply().context("Cannot get crtc reply")?;
+        debug!("crtc: {:?}", crtc_data);
+    }
+
+    let screen_resources_current = randr::get_screen_resources_current(conn, window)
+        .context("Error in get_screen_resources_current")?
+        .reply()
+        .context("Error in get_screen_resources_current reply")?;
+    debug!("Current: {:?}", screen_resources_current);
     Ok(())
 }
 
@@ -178,6 +191,7 @@ pub fn add_video_mode<C: Connection>(
 ) -> Result<u32> {
     let id = id as u32 + 300;
     // Only width / height seems to be used, default other values
+    conn.flush().context("Error in x11rb flush")?;
     let mode = randr::ModeInfo {
         id: 200,
         width,
@@ -196,28 +210,42 @@ pub fn add_video_mode<C: Connection>(
 
     let name_bytes: Vec<u8> = name.as_bytes().to_owned();
 
-    trace!("Create video mode {:?} ({:?}) {:?}", mode, id, name);
-    if let Ok(reply) = randr::create_mode(conn, window, mode, &name_bytes)
+    debug!("Create video mode {:?} ({:?}) {:?}", mode, id, name);
+    let reply = randr::create_mode(conn, window, mode, &name_bytes)
         .context("Error in create_mode")?
         .reply()
-    {
-        Ok(reply.mode)
-    } else {
-        warn!("Cannot create mode {:?} {}x{}", name, width, height);
-        if get_video_mode(conn, window, name)?.is_some() {
-            delete_video_mode_by_name(conn, window, name)
-                .context("Error in delete_video_mode_by_name")?;
-        }
-        Err(anyhow!("Cannot create video mode"))
-    }
+        .context("Error in create_mode reply")?;
+    debug!("New mode {:x}", reply.mode);
+    conn.flush().context("Error in x11rb flush")?;
+    // Set video mode
+    set_video_mode(conn, window, reply.mode).context("Cannot set video mode")?;
+    debug!("Set video mode ok");
+    conn.flush().context("Error in x11rb flush")?;
+
+    debug!("Set screen size");
+    randr::set_screen_size(conn, window, width, height, width as u32, height as u32)
+        .expect("cannot set screen size");
+
+    Ok(reply.mode)
 }
 
 /// Set video mode with id @mode
 pub fn set_video_mode<C: Connection>(conn: &C, window: Window, mode: u32) -> Result<()> {
+    debug!("Set video mode {:x}", mode);
     let screen_resources = randr::get_screen_resources(conn, window)
         .context("Error in get_screen_resources")?
         .reply()
         .context("Error in get_screen_resources reply")?;
+
+    /* find mode */
+    let mut mode_found = None;
+    for mode_info in screen_resources.modes.iter() {
+        if mode_info.id == mode {
+            mode_found = Some((mode_info.width, mode_info.height));
+            break;
+        }
+    }
+    let (width, height) = mode_found.expect("No matching mode");
 
     for output in screen_resources.outputs.iter() {
         let video_output = randr::get_output_info(conn, *output, 0)
@@ -228,7 +256,14 @@ pub fn set_video_mode<C: Connection>(conn: &C, window: Window, mode: u32) -> Res
         if video_output.crtc != 0 {
             // Add output mode
             randr::add_output_mode(conn, *output, mode).context("Error in add_output_mode")?;
-            // set video mode
+            conn.flush().context("Error in x11rb flush")?;
+            // XXX TODO: Sleep needed to wait for added mode ??
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            randr::set_screen_size(conn, window, width, height, width as u32, height as u32)
+                .context("cannot set screen size")?;
+            conn.flush().context("Error in x11rb flush")?;
+
+            // Set video mode
             randr::set_crtc_config(
                 conn,
                 video_output.crtc,
@@ -240,9 +275,9 @@ pub fn set_video_mode<C: Connection>(conn: &C, window: Window, mode: u32) -> Res
                 randr::Rotation::ROTATE0,
                 &[*output],
             )
-            .context("Error in set_crtc_config")?
+            .expect("Error in set_crtc_config")
             .reply()
-            .context("Error in set_crtc_config check")?;
+            .expect("Error in set_crtc_config check");
         }
     }
     Ok(())
