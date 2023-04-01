@@ -213,7 +213,7 @@ Ex: -j c:\user\dupond\printdir\
                 .long("grab_keyboard")
                 .action(ArgAction::SetTrue),
         );
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     let command = command.arg(
         Arg::new("vsock")
             .short('v')
@@ -238,7 +238,7 @@ Ex: -j c:\user\dupond\printdir\
 
     let server_port = *matches.get_one::<u16>("server_port").unwrap_or(&1122);
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     let vsock = matches.get_flag("vsock");
     let audio_buffer_ms = *matches.get_one::<u32>("audio_buffer_ms").unwrap_or(&150);
 
@@ -290,7 +290,7 @@ Ex: -j c:\user\dupond\printdir\
     let arguments = ArgumentsClient {
         server_addr,
         server_port,
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         vsock,
         audio,
         audio_sample_rate,

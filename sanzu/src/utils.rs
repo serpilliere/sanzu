@@ -42,7 +42,7 @@ pub struct ArgumentsSrv<'a> {
 pub struct ArgumentsClient<'a> {
     pub server_addr: &'a str,
     pub server_port: u16,
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     pub vsock: bool,
     pub audio: bool,
     pub audio_sample_rate: Option<u32>,

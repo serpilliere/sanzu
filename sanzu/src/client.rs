@@ -205,7 +205,7 @@ pub fn do_run(
 
     let mut socket: Box<dyn ReadWrite> = match &arguments.proxycommand {
         None => {
-            #[cfg(unix)]
+            #[cfg(target_os = "linux")]
             if arguments.vsock {
                 let port = arguments.server_port as u32;
                 let address = arguments
@@ -227,7 +227,7 @@ pub fn do_run(
                 server.set_nodelay(true).expect("set_nodelay call failed");
                 Box::new(server)
             }
-            #[cfg(windows)]
+            #[cfg(not(target_os = "linux"))]
             {
                 let port = arguments.server_port;
                 let destination = format!("{}:{}", arguments.server_addr, port);
