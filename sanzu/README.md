@@ -28,7 +28,7 @@ You can find more information on the architecture in `doc/architecture.md`.
 ```
 
 
-## Getting started
+## Use case 1: simple client/server
 - You'll need to create a X server (for example on number 100). On the server:
 ```
   Xvfb :100
@@ -54,6 +54,38 @@ You can find more information on the architecture in `doc/architecture.md`.
   ./sanzu_client 192.168.0.1 1122
 ```
 By default, sound is disabled. To enable it, server and client should be launched with option "--audio".
+
+## Use case 2: displaying graphics from local vm, using guest/host shared memory, using direct raw pixels
+Here, we will export the display of a linux guest to the host using shm between host and guest to extract pixels. We will also use vsock as sanzu client/server connection
+- To do so, you have to launch your preferred vm using additional qemu options:
+  - `-device vhost-vsock-pci,guest-cid=1337` : this will assign the vsock cid 1337 to the guest vm
+  - `-device ivshmem-plain,memdev=guestmem`: add a shm 'guestmem' between guest and host
+  - `-object memory-backend-file,size=64M,share=on,mem-path=/dev/shm/guestmem,id=guestmem`: link 'guestmem' to the `/dev/shm/guestmem` file
+
+Once the VM is running, you can execute the `sanzu_server` in the vm using:
+```
+sanzu_server --vsock --config 4294967295 --config sanzu.toml --export-video-pci --encoder null --audio --seamless
+```
+This makes `sanzu_server` listen on the vsock default address, on the default port (1122). It exports raw pixels to the host through the external pci ram backed by the shmem, without compression.
+We now run the `sanzu_client` on the host side:
+```
+sanzu_client 1337 1122 --vsock  --extern-img-source /dev/shm/guestmem --audio
+```
+
+This makes `sanzu_client` connect to the vsock cid 1337 (port 1122), which corresponds to our virtual machine. We use the file `/dev/shm/guestmem` to retrieve raw pixels.
+
+## Use case 3: displaying graphics from a remote vm, using guest/host shared memory and sanzu_proxy to use hypervisor video compression capabilities
+In this example, we use the same mechanism to extract raw pixels (shm) but we will encode those pixels using `sanzu_proxy` running on the hypervisor. This proxy exposes the same sanzu protocol as the `sanzu_server` (using video compression)
+- Reproduce the virtual machine configuration steps as in the use case 2.
+- Execute the `sanzu_proxy` on the hypervisor using:
+```
+sanzu_proxy 1337 1122 --vsock  --extern-img-source /dev/shm/guestmem --audio --encoder h264_nvenc  --listen-address  192.168.1.1 --listening-port 1122
+```
+
+You can now run the `sanzu_client` from a remote computer using:
+```
+sanzu_client  192.168.1.1 1122  --audio
+```
 
 ## Replacement of ssh -Y
 If you have a server, let's say Rochefort, which runs a X server on the display :1234, you can access it with:
