@@ -43,7 +43,7 @@ use winapi::{
     },
     um::{
         libloaderapi::{GetModuleHandleA, GetProcAddress, LoadLibraryA},
-        processthreadsapi::ExitProcess,
+        processthreadsapi::{ExitProcess, GetCurrentThreadId},
         shellapi::ShellExecuteA,
         wingdi::{CombineRgn, ExtCreateRegion},
         wingdi::{
@@ -1207,7 +1207,10 @@ fn grab_keyboard() {
         unsafe { std::mem::transmute(ptr) };
 
     let instance_handle = unsafe { GetModuleHandleA(null_mut()) };
-    let hook_id = unsafe { SetWindowsHookExA(WH_KEYBOARD_LL, Some(function), instance_handle, 0) };
+    let hook_id = unsafe { SetWindowsHookExA(WH_KEYBOARD_LL, Some(function), null_mut(), 0) };
+    if hook_id == null_mut() {
+        error!("Error in set windows hook ex");
+    }
     GRAB_KEYBOARD_ID.store(hook_id, atomic::Ordering::Release);
 }
 
